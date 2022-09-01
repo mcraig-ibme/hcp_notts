@@ -7,6 +7,7 @@ Command line interface
 import os
 import argparse
 import sys
+import subprocess
 
 from ._version import __version__
 
@@ -27,6 +28,19 @@ def envdir(var):
         sys.stderr.write(f"{var} not set or is not a directory\n")
         sys.exit(1)
     return dpath
+  
+def submit(cmd, argsdict, dep_job_id=None, queue=None):
+    sub_cmd = ['{fsldir}/bin/fsl_sub', '-l', '{subjlogdir}']
+    if queue:
+        sub_cmd += ['-q', queue]
+    if dep_job_id:
+        sub_cmd += ['-j', str(dep_job_id)]
+    sub_cmd += cmd
+    sub_cmd = [s.format(**argsdict) for s in sub_cmd]
+    if argsdict["debug"]:
+      print(" ".join(sub_cmd))
+    output = subprocess.check_output(sub_cmd)
+    return int(output)
 
 def main():
     parser = argparse.ArgumentParser(f'HCP pipelines Nottingham helper script v{__version__}', add_help=True)
@@ -108,9 +122,10 @@ def main():
     print(argdict)
 
     # If SGE_ROOT is set, use long.q FIXME how does this relate to Nottingham setup?
-    argdict["queue"] = ""
-    if "SGE_ROOT" in os.environ:
-        argdict["queue"] = "-q long.q"
+    if os.environ.get("SGE_ROOT", ""):
+        queue = "long.q"
+    else:
+        queue = ""
 
     # Apply standard prefix directories to templates and config dirs
     for k in argdict:
@@ -151,66 +166,64 @@ def main():
 
             if "PreFreeSurfer" not in args.skip:
                 print("\nSubmitting pre-freesurfer")
-                cmd = '{fsldir}/bin/fsl_sub {queue} \
-                    -l {subjlogdir} \
-                    {hcpdir}/PreFreeSurfer/PreFreeSurferPipeline.sh \
-                    --path="{basedir}" \
-                    --subject="{subjid}" \
-                    --t1="{t1fname}" \
-                    --t2="{t2fname}" \
-                    --t1template="{template_t1w}" \
-                    --t1templatebrain="{template_t1w_brain}" \
-                    --t1template2mm="{template_t1w_2mm}" \
-                    --t2template="{template_t2w}" \
-                    --t2templatebrain="{template_t2w_brain}" \
-                    --t2template2mm="{template_t2w_2mm}" \
-                    --templatemask="{template_mask}" \
-                    --template2mmmask="{template_mask_2mm}" \
-                    --brainsize="{brain_size}" \
-                    --fnirtconfig="{config_fnirt}" \
-                    --avgrdcmethod="{avgrdc_method}" \
-                    --fmapmag="{fmap_mag}" \
-                    --fmapphase="{fmap_phase}" \
-                    --echospacing="{fmap_te}" \
-                    --t1samplespacing="{fmap_t1w_sample_spacing}" \
-                    --t2samplespacing="{fmap_t2w_sample_spacing}" \
-                    --unwarpdir="{fmap_unwarp_dir}" \
-                    --gdcoeffs="{gdc_coeffs}" \
-                    --topupconfig="{topup_config}"'.format(**argdict)
-                if args.debug: print(cmd)
+                cmd = [
+	            '{hcpdir}/PreFreeSurfer/PreFreeSurferPipeline.sh',
+                    '--path="{basedir}"',
+                    '--subject="{subjid}"',
+                    '--t1="{t1fname}"',
+                    '--t2="{t2fname}"',
+                    '--t1template="{template_t1w}"',
+                    '--t1templatebrain="{template_t1w_brain}"',
+                    '--t1template2mm="{template_t1w_2mm}"',
+                    '--t2template="{template_t2w}"',
+                    '--t2templatebrain="{template_t2w_brain}"',
+                    '--t2template2mm="{template_t2w_2mm}"',
+                    '--templatemask="{template_mask}"',
+                    '--template2mmmask="{template_mask_2mm}"',
+                    '--brainsize="{brain_size}"',
+                    '--fnirtconfig="{config_fnirt}"',
+                    '--avgrdcmethod="{avgrdc_method}"',
+                    '--fmapmag="{fmap_mag}"',
+                    '--fmapphase="{fmap_phase}"',
+                    '--echospacing="{fmap_te}"',
+                    '--t1samplespacing="{fmap_t1w_sample_spacing}"',
+                    '--t2samplespacing="{fmap_t2w_sample_spacing}"',
+                    '--unwarpdir="{fmap_unwarp_dir}"',
+                    '--gdcoeffs="{gdc_coeffs}"',
+                    '--topupconfig="{topup_config}"',
+                ]
+                job_id_prefreesurfer = submit(cmd, argdict, queue=queue)
 
             if "FreeSurfer" not in args.skip:
                 print("\nSubmitting freesurfer")
                 # FIXME what if t2 does not exist?
-                cmd = '{fsldir}/bin/fsl_sub {queue} \
-                    -l {subjlogdir} \
-                    -j $jobidPreFreeSurfer \
-                    {hcpdir}/FreeSurfer/FreeSurferPipeline.sh \
-                    --subject="{subjid}" \
-                    --subjectDIR="{subjdir}/T1w" \
-                    --t1="{subjdir}/T1w/T1w_acpc_dc_restore.nii.gz" \
-                    --t1brain="{subjdir}/T1w/T1w_acpc_dc_restore_brain.nii.gz" \
-                    --t2="{subjdir}/T1w/T2w_acpc_dc_restore.nii.gz"'.format(**argdict)
-                if args.debug: print(cmd)
+                cmd = [
+                    '{hcpdir}/FreeSurfer/FreeSurferPipeline.sh',
+                    '--subject="{subjid}"',
+                    '--subjectDIR="{subjdir}/T1w"',
+                    '--t1="{subjdir}/T1w/T1w_acpc_dc_restore.nii.gz"',
+                    '--t1brain="{subjdir}/T1w/T1w_acpc_dc_restore_brain.nii.gz"',
+                    '--t2="{subjdir}/T1w/T2w_acpc_dc_restore.nii.gz"',
+                ]
+                job_id_freesurfer = submit(cmd, argdict, job_id_prefreesurfer, queue=queue)
       
             if "PostFreeSurfer" not in args.skip:
                 print("\nSubmitting post-freesurfer")
                 # FIXME what if t2 does not exist?
-                cmd = 'j{fsldir}/bin/fsl_sub {queue} \
-                    -l {subjlogdir} \
-                    -j $jobidFreeSurfer \
-                    {hcpdir}/PostFreeSurfer/PostFreeSurferPipeline.sh \
-                    --path="{basedir}" \
-                    --subject="{subjid}" \
-                    --surfatlasdir="{template_surface_atlas_dir}" \
-                    --grayordinatesdir="{template_grayordinates_space_dir}" \
-                    --grayordinatesres="{grayordinates_res}" \
-                    --hiresmesh="{hires_mesh}" \
-                    --lowresmesh="{lores_mesh}" \
-                    --subcortgraylabels="{config_subcort_gray_labels}" \
-                    --freesurferlabels="{config_freesurfer_labels}" \
-                    --refmyelinmaps="{template_ref_myelin_maps}"'.format(**argdict)
-                if args.debug: print(cmd)
-      
+                cmd = [
+                    '{hcpdir}/PostFreeSurfer/PostFreeSurferPipeline.sh',
+                    '--path="{basedir}"',
+                    '--subject="{subjid}"',
+                    '--surfatlasdir="{template_surface_atlas_dir}"',
+                    '--grayordinatesdir="{template_grayordinates_space_dir}"',
+                    '--grayordinatesres="{grayordinates_res}"',
+                    '--hiresmesh="{hires_mesh}"',
+                    '--lowresmesh="{lores_mesh}"',
+                    '--subcortgraylabels="{config_subcort_gray_labels}"',
+                    '--freesurferlabels="{config_freesurfer_labels}"',
+                    '--refmyelinmaps="{template_ref_myelin_maps}"',
+                ]
+                job_id_postfreesurfer = submit(cmd, argdict, job_id_freesurfer, queue=queue)
+
 if __name__ == "__main__":
     main()
